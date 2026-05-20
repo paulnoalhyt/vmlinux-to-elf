@@ -573,7 +573,8 @@ class KallsymsFinder:
         elf64_rela = []
         empty_entries = 0
         minimal_heuristic_count = 1000
-        minimal_kernel_va = 0xFFFFC00080000000
+        # minimal_kernel_va = 0xFFFFC00080000000
+        minimal_kernel_va = 0xFFFF000000000000  # Some aarch64 kernels have a lower base address (for example 0xFFFF800010000000)
         addend_candidate = None
 
         # Relocations table located at 'init' part of kernel image

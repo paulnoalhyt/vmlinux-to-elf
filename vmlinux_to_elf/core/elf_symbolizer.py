@@ -128,7 +128,8 @@ class ElfSymbolizer:
 
             kernel.sections += [null, progbits]
 
-            if kallsyms_finder.elf64_rela:
+            # if kallsyms_finder.elf64_rela:
+            if None:  # prefer having all code in one region rather than 2
                 # Punch a hole into the ELF to remove relocation tables
                 progbits.section_header.sh_size = (
                     kallsyms_finder.elf64_rela_start

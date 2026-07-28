@@ -269,6 +269,8 @@ class KallsymsFinder:
         if self.kernel_text_candidate is None:
             self.infer_base_address_from_syms()
 
+        self.verify_base_address()
+
     def preprocess_uimage_header(self):
 
         # Parse uImage header magic (always big-endian)
@@ -390,6 +392,81 @@ class KallsymsFinder:
             logging.info(
                 '[+] Guessed the base address using the '
                 + f'first_symbol_virtual_address fallback heuristic ({self.kernel_text_candidate:x})'
+            )
+
+    def _decode_arm32_bl_targets(self, scan_size):
+        targets = []
+        endian = 'big' if self.is_big_endian else 'little'
+        for off in range(0, scan_size, 4):
+            word = int.from_bytes(
+                self.kernel_img[off : off + 4], endian
+            )
+            cond = (word >> 28) & 0xF
+            is_bl = ((word >> 25) & 0x7) == 0x5 and ((word >> 24) & 1) == 1
+            if not (is_bl and cond <= 0xE):
+                continue
+            imm24 = word & 0x00FFFFFF
+            if imm24 & 0x800000:
+                imm24 -= 0x1000000
+            target_file_offset = off + imm24 * 4 + 8
+            if target_file_offset >= 0:
+                targets.append((off, target_file_offset))
+        return targets
+
+    def verify_base_address(self):
+        if self.kernel_text_candidate is None or not self.symbols:
+            return
+
+        sym_addrs = {s.virtual_address for s in self.symbols}
+        base = self.kernel_text_candidate
+        scan_size = min(len(self.kernel_img), 0x400)
+
+        EM_ARM = 40
+
+        if self.elf_machine == EM_ARM:
+            bl_targets = self._decode_arm32_bl_targets(scan_size)
+        else:
+            return
+
+        if not bl_targets:
+            return
+
+        for _, target_foff in bl_targets:
+            if (base + target_foff) in sym_addrs:
+                return
+
+        best_delta = None
+        best_verified = 0
+
+        for anchor_idx in range(min(len(bl_targets), 3)):
+            _, anchor_foff = bl_targets[anchor_idx]
+            anchor_expected = base + anchor_foff
+
+            for sym in self.symbols:
+                if sym.symbol_type != KallsymsSymbolType.TEXT:
+                    continue
+                delta = anchor_expected - sym.virtual_address
+                if delta <= 0 or delta > 0x800000 or delta % 0x1000 != 0:
+                    continue
+
+                verified = sum(
+                    1
+                    for _, foff in bl_targets
+                    if (base - delta + foff) in sym_addrs
+                )
+
+                if verified > best_verified:
+                    best_verified = verified
+                    best_delta = delta
+
+        if best_delta is not None and best_verified >= 2:
+            old_base = self.kernel_text_candidate
+            self.kernel_text_candidate -= best_delta
+            logging.info(
+                '[+] Corrected base address from 0x%x to 0x%x '
+                'by cross-referencing %d branch instruction '
+                'targets against the symbol table'
+                % (old_base, self.kernel_text_candidate, best_verified)
             )
 
     def find_linux_kernel_version(self):

@@ -431,9 +431,12 @@ class KallsymsFinder:
         if not bl_targets:
             return
 
-        for _, target_foff in bl_targets:
-            if (base + target_foff) in sym_addrs:
-                return
+        current_hits = sum(
+            1 for _, target_foff in bl_targets
+            if (base + target_foff) in sym_addrs
+        )
+        if current_hits >= 2:
+            return
 
         best_delta = None
         best_verified = 0
